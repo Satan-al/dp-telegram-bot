@@ -399,10 +399,10 @@ async def send_reaction_to_firebase(tg_user, emoji):
 # ============= ОБРАБОТКА СООБЩЕНИЙ =============
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка обычных текстовых сообщений из группы"""
+    """Обработка обычных текстовых сообщений из целевой группы"""
     
-    # Игнорируем сообщения не из группы
-    if update.message.chat.type not in ['group', 'supergroup']:
+    # Проверяем что это сообщение из нашей целевой группы
+    if str(update.message.chat.id) != CHAT_ID:
         return
     
     # Игнорируем сообщения бота
@@ -546,7 +546,7 @@ def main():
     # Создаём приложение
     app = Application.builder().token(BOT_TOKEN).build()
     
-    # Регистрируем команды
+    # Регистрируем команды (работают везде - в ЛС и группах)
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("link", link_command))
@@ -558,9 +558,10 @@ def main():
     # Обработчик callback кнопок
     app.add_handler(CallbackQueryHandler(reaction_callback, pattern="^react_"))
     
-    # Обработчик обычных сообщений из группы
+    # Обработчик обычных сообщений из целевой группы (НЕ команды!)
+    # Внутри handle_message проверяется CHAT_ID
     app.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,
+        filters.TEXT & ~filters.COMMAND,
         handle_message
     ))
     
