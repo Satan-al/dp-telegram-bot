@@ -72,6 +72,7 @@ SITE_EMOJIS = [
 # Глобальные переменные
 firebase_listener = None
 last_processed_message = {}
+message_queue = None  # Будет создана в main()
 
 
 # ============= ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =============
@@ -448,72 +449,88 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ============= СЛУШАТЕЛЬ FIREBASE =============
 
-async def firebase_listener_task(app):
-    """Слушает новые сообщения из Firebase и отправляет в Telegram"""
-    print("👂 Запуск слушателя Firebase...")
-    
-    def on_message_added(event):
-        """Callback при добавлении нового сообщения"""
+def firebase_callback(event):
+    """Синхронный callback для Firebase - просто добавляет в очередь"""
+    try:
+        if not event.data:
+            return
+        
+        msg = event.data
+        
+        # Игнорируем сообщения от Telegram
+        if msg.get('fromTelegram'):
+            return
+        
+        # Игнорируем уже обработанные
+        msg_time = msg.get('t', 0)
+        last_time = last_processed_message.get('time', 0)
+        if msg_time <= last_time:
+            return
+        
+        last_processed_message['time'] = msg_time
+        
+        # Добавляем в очередь для обработки
         try:
-            if not event.data:
-                return
+            message_queue.put_nowait(msg)
+        except:
+            pass  # Очередь заполнена, пропускаем
             
-            msg = event.data
-            msg_key = event.path.strip('/')
-            
-            # Игнорируем сообщения от Telegram (чтобы не было дубликатов)
-            if msg.get('fromTelegram'):
-                return
-            
-            # Игнорируем уже обработанные
-            msg_time = msg.get('t', 0)
-            last_time = last_processed_message.get('time', 0)
-            if msg_time <= last_time:
-                return
-            
-            last_processed_message['time'] = msg_time
+    except Exception as e:
+        print(f"❌ Ошибка в firebase_callback: {e}")
+
+
+async def process_firebase_messages(app):
+    """Асинхронная обработка сообщений из очереди"""
+    print("🔄 Запуск обработчика сообщений Firebase...")
+    
+    while True:
+        try:
+            # Ждём новое сообщение из очереди
+            msg = await message_queue.get()
             
             # Формируем текст для Telegram
             name = msg.get('name', 'Гость')
             text = msg.get('text', '')
-            color_indicator = '🎨'  # можно добавить цветной кружок
+            color_indicator = '🎨'
             
-            # Проверяем, привязан ли этот пользователь
+            # Проверяем привязку
             link = get_link_by_site_uid(msg.get('uid', ''))
             if link:
-                # Привязанный пользователь
                 telegram_text = f"{color_indicator} **{name}**: {text}"
             else:
-                # Непривязанный - добавляем [WEB]
                 telegram_text = f"[WEB] **{name}**: {text}"
             
-            # Отправляем в Telegram группу
-            asyncio.create_task(
-                app.bot.send_message(
-                    chat_id=CHAT_ID,
-                    text=telegram_text,
-                    parse_mode='Markdown'
-                )
+            # Отправляем в Telegram
+            await app.bot.send_message(
+                chat_id=CHAT_ID,
+                text=telegram_text,
+                parse_mode='Markdown'
             )
             
             print(f"🌐→📱 {name}: {text[:50]}")
             
         except Exception as e:
-            print(f"❌ Ошибка в firebase_listener: {e}")
-    
-    # Подписываемся на новые сообщения
+            print(f"❌ Ошибка обработки сообщения: {e}")
+            await asyncio.sleep(1)
+
+
+def start_firebase_listener():
+    """Запускает Firebase слушатель (синхронный)"""
     try:
         chat_ref = db.reference(CHAT_REF)
-        chat_ref.listen(on_message_added)
-        print("✅ Слушатель Firebase запущен")
+        chat_ref.listen(firebase_callback)
+        print("✅ Firebase слушатель подключен")
+        return True
     except Exception as e:
-        print(f"❌ Ошибка запуска слушателя: {e}")
+        print(f"❌ Ошибка запуска Firebase слушателя: {e}")
+        return False
 
 
 # ============= MAIN =============
 
 def main():
     """Запуск бота"""
+    global message_queue
     
     if not BOT_TOKEN:
         print("❌ Не найден BOT_TOKEN в .env файле!")
@@ -547,11 +564,22 @@ def main():
         handle_message
     ))
     
-    # Запускаем слушатель Firebase ПОСЛЕ старта event loop
+    # Запускаем Firebase слушатель и обработчик после старта event loop
     async def post_init(application):
         """Инициализация после запуска event loop"""
-        asyncio.create_task(firebase_listener_task(application))
-        print("✅ Firebase слушатель запущен")
+        global message_queue
+        
+        # Создаём очередь для сообщений (внутри event loop!)
+        message_queue = asyncio.Queue()
+        
+        # Запускаем синхронный Firebase слушатель в отдельном потоке
+        import threading
+        firebase_thread = threading.Thread(target=start_firebase_listener, daemon=True)
+        firebase_thread.start()
+        
+        # Запускаем асинхронный обработчик сообщений
+        asyncio.create_task(process_firebase_messages(application))
+        print("✅ Система синхронизации запущена")
     
     app.post_init = post_init
     
