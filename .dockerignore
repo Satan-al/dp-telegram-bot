@@ -1,0 +1,9 @@
+# flyctl launch added from .gitignore
+**\serviceAccountKey.json
+**\.env
+**\__pycache__
+**\*.pyc
+**\*.log
+**\token.txt
+**\.DS_Store
+fly.toml

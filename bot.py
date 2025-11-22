@@ -402,6 +402,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка обычных текстовых сообщений из целевой группы"""
     
     print(f"📨 Получено сообщение из чата {update.message.chat.id} (тип: {update.message.chat.type})")
+    print(f"🔍 Целевой CHAT_ID из переменной: {CHAT_ID}")
+    print(f"🔍 Сравнение: '{str(update.message.chat.id)}' vs '{CHAT_ID}'")
     
     # Проверяем что это сообщение из нашей целевой группы
     if str(update.message.chat.id) != CHAT_ID:
@@ -497,14 +499,14 @@ async def process_firebase_messages(app):
             # Формируем текст для Telegram
             name = msg.get('name', 'Гость')
             text = msg.get('text', '')
-            color_indicator = '🎨'
             
-            # Проверяем привязку
+            # Проверяем привязку - используем эмодзи для привязанных
             link = get_link_by_site_uid(msg.get('uid', ''))
             if link:
-                telegram_text = f"{color_indicator} **{name}**: {text}"
+                telegram_text = f"🎨 **{name}**: {text}"
             else:
-                telegram_text = f"[WEB] **{name}**: {text}"
+                # Для непривязанных - просто имя без префикса
+                telegram_text = f"**{name}**: {text}"
             
             # Отправляем в Telegram
             await app.bot.send_message(
