@@ -1,0 +1,63 @@
+{
+  "rules": {
+    "sessions": {
+      "DepressivePasties": {
+        // Чат - все могут читать и писать
+        "chat": {
+          ".read": true,
+          ".write": "auth != null",
+          ".indexOn": ["t"],
+          "$messageId": {
+            ".validate": "newData.hasChildren(['uid', 'name', 'text', 't'])"
+          }
+        },
+        
+        // Реакции - все могут читать и писать
+        "reactions": {
+          ".read": true,
+          ".write": "auth != null",
+          ".indexOn": ["t"],
+          "$reactionId": {
+            ".validate": "newData.hasChildren(['uid', 'color', 'emoji', 't'])"
+          }
+        },
+        
+        // Привязки Telegram - только авторизованные
+        "telegram_links": {
+          ".read": "auth != null",
+          ".write": "auth != null",
+          "$userId": {
+            ".validate": "newData.hasChildren(['siteUserId', 'siteName', 'siteColor', 'tgUserId', 'linkedAt'])"
+          }
+        },
+        
+        // Коды привязки - только авторизованные
+        "link_codes": {
+          ".read": "auth != null",
+          ".write": "auth != null",
+          "$code": {
+            ".validate": "newData.hasChildren(['userId', 'name', 'color', 'createdAt', 'expiresAt', 'used'])"
+          }
+        },
+        
+        // Голоса - все могут читать и писать
+        "points": {
+          ".read": true,
+          ".write": "auth != null"
+        },
+        
+        // Рисунки - все могут читать и писать
+        "strokes": {
+          ".read": true,
+          ".write": "auth != null"
+        },
+        
+        // Присутствие - все могут читать и писать
+        "presence": {
+          ".read": true,
+          ".write": "auth != null"
+        }
+      }
+    }
+  }
+}

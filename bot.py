@@ -547,8 +547,13 @@ def main():
         handle_message
     ))
     
-    # Запускаем слушатель Firebase
-    asyncio.create_task(firebase_listener_task(app))
+    # Запускаем слушатель Firebase ПОСЛЕ старта event loop
+    async def post_init(application):
+        """Инициализация после запуска event loop"""
+        asyncio.create_task(firebase_listener_task(application))
+        print("✅ Firebase слушатель запущен")
+    
+    app.post_init = post_init
     
     # Запускаем бота
     print("✅ Бот запущен! Нажми Ctrl+C для остановки.")
