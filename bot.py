@@ -401,16 +401,22 @@ async def send_reaction_to_firebase(tg_user, emoji):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка обычных текстовых сообщений из целевой группы"""
     
+    print(f"📨 Получено сообщение из чата {update.message.chat.id} (тип: {update.message.chat.type})")
+    
     # Проверяем что это сообщение из нашей целевой группы
     if str(update.message.chat.id) != CHAT_ID:
+        print(f"⚠️ Игнорируем: чат {update.message.chat.id} != целевой {CHAT_ID}")
         return
     
     # Игнорируем сообщения бота
     if update.message.from_user.is_bot:
+        print(f"⚠️ Игнорируем: сообщение от бота")
         return
     
     tg_user = update.message.from_user
     text = update.message.text
+    
+    print(f"✅ Обрабатываем сообщение от {tg_user.first_name}: {text[:50]}")
     
     # Проверяем привязку
     link = get_link_by_tg_id(tg_user.id)
