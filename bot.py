@@ -303,7 +303,13 @@ async def reaction_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args and len(context.args) > 0:
         emoji = ' '.join(context.args)
         await send_reaction_to_firebase(update.effective_user, emoji)
-        await update.message.reply_text(f"✅ Реакция отправлена: {emoji}")
+        
+        # Удаляем сообщение пользователя с командой через 0.5 сек
+        await asyncio.sleep(0.5)
+        try:
+            await update.message.delete()
+        except:
+            pass  # Игнорируем если нет прав на удаление
         return
     
     # Создаём inline клавиатуру с эмодзи
@@ -335,7 +341,7 @@ async def reaction_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def reaction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка нажатий на кнопки реакций"""
     query = update.callback_query
-    await query.answer()
+    await query.answer()  # Просто подтверждаем нажатие без текста
     
     data = query.data
     
@@ -354,10 +360,11 @@ async def reaction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Отправляем реакцию в Firebase
     await send_reaction_to_firebase(query.from_user, emoji)
     
-    await query.edit_message_text(
-        f"✅ **Реакция отправлена!**\n\n{emoji}\n\n"
-        f"Все на сайте её увидят! 🎬"
-    )
+    # Просто удаляем меню без уведомления
+    try:
+        await query.message.delete()
+    except:
+        pass  # Игнорируем если нет прав
 
 
 async def send_reaction_to_firebase(tg_user, emoji):
