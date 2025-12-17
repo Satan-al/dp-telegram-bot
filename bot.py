@@ -29,6 +29,7 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 CHAT_ID = os.getenv('CHAT_ID')
+RAT_CHAT_ID = "-1002378701536"  # ID группы для RAT режима
 FIREBASE_DATABASE_URL = os.getenv('FIREBASE_DATABASE_URL')
 
 # Firebase инициализация
@@ -61,6 +62,7 @@ CHAT_REF = f'{BASE_PATH}/chat'
 LINKS_REF = f'{BASE_PATH}/telegram_links'
 CODES_REF = f'{BASE_PATH}/link_codes'
 REACTIONS_REF = f'{BASE_PATH}/reactions'
+RAT_MODE_REF = f'{BASE_PATH}/rat_mode'  # Флаг RAT режима
 
 # Эмодзи из сайта (те же 18 что на сайте)
 SITE_EMOJIS = [
@@ -106,6 +108,17 @@ def get_link_by_tg_id(tg_user_id):
     except Exception as e:
         print(f"❌ Ошибка get_link_by_tg_id: {e}")
     return None
+
+
+def is_rat_mode_active():
+    """Проверить активен ли RAT режим"""
+    try:
+        ref = db.reference(RAT_MODE_REF)
+        rat_data = ref.get() or {}
+        return rat_data.get('active', False)
+    except Exception as e:
+        print(f"❌ Ошибка is_rat_mode_active: {e}")
+        return False
 
 
 # ============= КОМАНДЫ БОТА =============
@@ -410,11 +423,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     print(f"📨 Получено сообщение из чата {update.message.chat.id} (тип: {update.message.chat.type})")
     print(f"🔍 Целевой CHAT_ID из переменной: {CHAT_ID}")
-    print(f"🔍 Сравнение: '{str(update.message.chat.id)}' vs '{CHAT_ID}'")
+    print(f"🔍 RAT_CHAT_ID: {RAT_CHAT_ID}")
+    print(f"🔍 Сравнение: '{str(update.message.chat.id)}' vs '{CHAT_ID}' или '{RAT_CHAT_ID}'")
     
-    # Проверяем что это сообщение из нашей целевой группы
-    if str(update.message.chat.id) != CHAT_ID:
-        print(f"⚠️ Игнорируем: чат {update.message.chat.id} != целевой {CHAT_ID}")
+    # Проверяем что это сообщение из одной из наших групп
+    is_main_chat = str(update.message.chat.id) == CHAT_ID
+    is_rat_chat = str(update.message.chat.id) == RAT_CHAT_ID
+    
+    if not (is_main_chat or is_rat_chat):
+        print(f"⚠️ Игнорируем: чат {update.message.chat.id} не является целевым")
         return
     
     # Игнорируем сообщения бота
@@ -422,9 +439,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"⚠️ Игнорируем: сообщение от бота")
         return
     
-    tg_user = update.message.from_user
+    # АВТОУДАЛЕНИЕ КОМАНД (начинающихся с /)
     text = update.message.text
+    if text and text.startswith('/'):
+        try:
+            await update.message.delete()
+            print(f"🗑️ Удалена команда: {text[:50]}")
+        except Exception as e:
+            print(f"⚠️ Не удалось удалить команду: {e}")
+        return
     
+    tg_user = update.message.from_user
     print(f"✅ Обрабатываем сообщение от {tg_user.first_name}: {text[:50]}")
     
     # Проверяем привязку
@@ -452,11 +477,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'fromTelegram': True
             }
         
-        # Отправляем в Firebase
-        chat_ref = db.reference(CHAT_REF)
-        chat_ref.push(message_data)
-        
-        print(f"📱→🌐 {message_data['name']}: {text[:50]}")
+        # Отправляем в Firebase ТОЛЬКО если сообщение из основной группы
+        if is_main_chat:
+            chat_ref = db.reference(CHAT_REF)
+            chat_ref.push(message_data)
+            print(f"📱→🌐 {message_data['name']}: {text[:50]}")
+        else:
+            print(f"📱 RAT группа: {message_data['name']}: {text[:50]} (не отправляем в Firebase)")
         
     except Exception as e:
         print(f"❌ Ошибка handle_message: {e}")
@@ -515,7 +542,7 @@ async def process_firebase_messages(app):
                 # Для непривязанных - просто имя без префикса
                 telegram_text = f"**{name}**: {text}"
             
-            # Отправляем в Telegram
+            # Отправляем в основную группу
             await app.bot.send_message(
                 chat_id=CHAT_ID,
                 text=telegram_text,
@@ -524,8 +551,21 @@ async def process_firebase_messages(app):
             
             print(f"🌐→📱 {name}: {text[:50]}")
             
+            # Если RAT режим активен - дублируем в RAT группу
+            if is_rat_mode_active():
+                try:
+                    await app.bot.send_message(
+                        chat_id=RAT_CHAT_ID,
+                        text=telegram_text,
+                        parse_mode='Markdown'
+                    )
+                    print(f"🐀→📱 RAT: {name}: {text[:50]}")
+                except Exception as rat_err:
+                    print(f"⚠️ Ошибка отправки в RAT группу: {rat_err}")
+            
         except Exception as e:
             print(f"❌ Ошибка обработки сообщения: {e}")
+            await asyncio.sleep(1)
             await asyncio.sleep(1)
 
 
