@@ -417,104 +417,99 @@ async def send_reaction_to_firebase(tg_user, emoji):
 
 
 # ============= ОБРАБОТКА СООБЩЕНИЙ =============
-
+async def delete_any_slash_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text.startswith('/') and update.message.chat.type in ['group', 'supergroup']:
+        try:
+            await update.message.delete()
+            print(f"🗑️ Удалено сообщение с /: {update.message.text[:50]}")
+        except Exception as e:
+            print(f"⚠️ Ошибка удаления: {e} — дай боту права, мать его!")
+app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.GROUPS, delete_any_slash_message))
+        
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка обычных текстовых сообщений из целевых групп — с RAT-магией и автоудалением"""
     
-    # Логируем всё, чтоб не гадать в темноте
     print(f"📨 Получено сообщение из чата {update.message.chat.id} (тип: {update.message.chat.type})")
     print(f"🔍 Целевой CHAT_ID: {CHAT_ID}")
     print(f"🔍 RAT_CHAT_ID: {RAT_CHAT_ID}")
     print(f"🔍 Сравнение: '{str(update.message.chat.id)}' vs '{CHAT_ID}' или '{RAT_CHAT_ID}'")
     
-    # Проверяем, наша ли группа — свобода только для избранных!
     chat_id = str(update.message.chat.id)
     if chat_id not in [CHAT_ID, RAT_CHAT_ID]:
-        print(f"⚠️ Игнорируем: чат {chat_id} — чужак в наших землях!")
+        print(f"⚠️ Игнорируем: чат {chat_id} — чужак!")
         return
     
-    # Игнорируем ботов — они и так как зомби, без души
+    if chat_id == RAT_CHAT_ID and not is_rat_mode_active():
+        print(f"⚠️ Игнорируем RAT группу когда режим off — свобода спит!")
+        return
+    
     if update.message.from_user.is_bot:
-        print(f"⚠️ Игнорируем: сообщение от бота — пусть сам с собой болтает")
+        print(f"⚠️ Игнорируем бота")
         return
     
-    # АВТОУДАЛЕНИЕ КОМАНД: любые / — в топку, чтоб чат был чист, как эльфийский лес
     text = update.message.text
     if text and text.startswith('/'):
         try:
             await update.message.delete()
-            print(f"🗑️ Удалена команда: {text[:50]} — ха, исчезни, придурок!")
+            print(f"🗑️ Удалена команда: {text[:50]}")
         except Exception as e:
-            print(f"⚠️ Не удалось удалить команду: {e} — проклятая магия Telegram!")
+            print(f"⚠️ Ошибка удаления: {e} — дай боту права админа с delete!")
         return
     
     tg_user = update.message.from_user
-    print(f"✅ Обрабатываем сообщение от {tg_user.first_name}: {text[:50]}")
+    print(f"✅ Обрабатываем от {tg_user.first_name}: {text[:50]}")
     
-    # Проверяем привязку — для цвета и имени, чтоб не было серой массы
     link = get_link_by_tg_id(tg_user.id)
     
     try:
-        if link:
-            message_data = {
-                'uid': link['siteUserId'],
-                'name': link['siteName'],
-                'color': link['siteColor'],
-                'text': text,
-                't': int(time.time() * 1000),
-                'fromTelegram': True
-            }
-        else:
-            message_data = {
-                'uid': f"tg_{tg_user.id}",
-                'name': f"[TG] {tg_user.first_name}",
-                'color': '#00a0e9',
-                'text': text,
-                't': int(time.time() * 1000),
-                'fromTelegram': True
-            }
+        message_data = {
+            'uid': link['siteUserId'] if link else f"tg_{tg_user.id}",
+            'name': link['siteName'] if link else f"[TG] {tg_user.first_name}",
+            'color': link['siteColor'] if link else '#00a0e9',
+            'text': text,
+            't': int(time.time() * 1000),
+            'fromTelegram': True
+        }
         
-        # Отправляем в Firebase — всегда, чтоб сайт видел всё, мать его свобода!
-        chat_ref = db.reference(CHAT_REF)
-        new_msg_ref = chat_ref.push(message_data)
-        msg_key = new_msg_ref.key  # Для возможного удаления
-        print(f"📱→🌐 {message_data['name']}: {text[:50]} (ключ: {msg_key})")
+        # Push в Firebase ТОЛЬКО если из main или RAT on и из RAT (но для RAT не push, чтоб нет loop)
+        if chat_id == CHAT_ID or (chat_id == RAT_CHAT_ID and False):  # Для RAT не push, оставляем в TG
+            chat_ref = db.reference(CHAT_REF)
+            new_msg_ref = chat_ref.push(message_data)
+            msg_key = new_msg_ref.key
+            print(f"📱→🌐 {message_data['name']}: {text[:50]} (ключ: {msg_key})")
+            
+            if is_rat_mode_active():
+                ref_path = f"{CHAT_REF}/{msg_key}"
+                asyncio.create_task(delayed_delete(ref_path, 300))
+                print(f"⏳ Удаление {ref_path} через 5 мин")
         
-        # Если RAT-режим активен — дублируем в RAT-группу и планируем самоуничтожение!
-        if is_rat_mode_active():
-            # Дублируем в RAT TG
+        # Дубли в RAT TG если RAT on и из main
+        if is_rat_mode_active() and chat_id == CHAT_ID:
             telegram_text = f"🎨 **{message_data['name']}**: {text}" if link else f"**{message_data['name']}**: {text}"
             await context.bot.send_message(
                 chat_id=RAT_CHAT_ID,
                 text=telegram_text,
                 parse_mode='Markdown'
             )
-            print(f"🐀 Дублировано в RAT: {message_data['name']}: {text[:50]}")
-            
-            # Планируем удаление из Firebase через 5 мин — пусть исчезнет, как сон!
-            ref_path = f"{CHAT_REF}/{msg_key}"
-            asyncio.create_task(delayed_delete(ref_path, 300))  # 300 сек = 5 мин
-            print(f"⏳ Запланировано удаление {ref_path} через 5 мин — свобода временна!")
+            print(f"🐀 Дубли в RAT: {message_data['name']}: {text[:50]}")
         
     except Exception as e:
-        print(f"❌ Ошибка в handle_message: {e} — чёртова энтропия!")
+        print(f"❌ Ошибка: {e}")
 
 
 # ============= СЛУШАТЕЛЬ FIREBASE =============
 
 def firebase_callback(event):
-    """Синхронный callback для Firebase - просто добавляет в очередь"""
+    """Синхронный callback для Firebase - добавляет в очередь с key"""
     try:
         if not event.data:
             return
         
         msg = event.data
         
-        # Игнорируем сообщения от Telegram
         if msg.get('fromTelegram'):
             return
         
-        # Игнорируем уже обработанные
         msg_time = msg.get('t', 0)
         last_time = last_processed_message.get('time', 0)
         if msg_time <= last_time:
@@ -522,11 +517,12 @@ def firebase_callback(event):
         
         last_processed_message['time'] = msg_time
         
-        # Добавляем в очередь для обработки
+        msg_key = event.path[1:] if event.path.startswith('/') else event.path  # Ключ сообщения
+        
         try:
-            message_queue.put_nowait(msg)
+            message_queue.put_nowait((msg, msg_key))
         except:
-            pass  # Очередь заполнена, пропускаем
+            pass
             
     except Exception as e:
         print(f"❌ Ошибка в firebase_callback: {e}")
@@ -538,45 +534,29 @@ async def process_firebase_messages(app):
     
     while True:
         try:
-            # Ждём новое сообщение из очереди
-            msg = await message_queue.get()
+            msg, msg_key = await message_queue.get()  # Теперь с key
             
-            # Формируем текст для Telegram
             name = msg.get('name', 'Гость')
             text = msg.get('text', '')
             
-            # Проверяем привязку - используем эмодзи для привязанных
             link = get_link_by_site_uid(msg.get('uid', ''))
-            if link:
-                telegram_text = f"🎨 **{name}**: {text}"
-            else:
-                # Для непривязанных - просто имя без префикса
-                telegram_text = f"**{name}**: {text}"
+            telegram_text = f"🎨 **{name}**: {text}" if link else f"**{name}**: {text}"
             
-            # Отправляем в основную группу
+            target_chat = RAT_CHAT_ID if is_rat_mode_active() else CHAT_ID
             await app.bot.send_message(
-                chat_id=CHAT_ID,
+                chat_id=target_chat,
                 text=telegram_text,
                 parse_mode='Markdown'
             )
+            print(f"🌐→📱 {name}: {text[:50]} в чат {target_chat}")
             
-            print(f"🌐→📱 {name}: {text[:50]}")
-            
-            # Если RAT режим активен - дублируем в RAT группу
             if is_rat_mode_active():
-                try:
-                    await app.bot.send_message(
-                        chat_id=RAT_CHAT_ID,
-                        text=telegram_text,
-                        parse_mode='Markdown'
-                    )
-                    print(f"🐀→📱 RAT: {name}: {text[:50]}")
-                except Exception as rat_err:
-                    print(f"⚠️ Ошибка отправки в RAT группу: {rat_err}")
+                ref_path = f"{CHAT_REF}/{msg_key}"
+                asyncio.create_task(delayed_delete(ref_path, 300))
+                print(f"⏳ Запланировано удаление {ref_path} через 5 мин")
             
         except Exception as e:
             print(f"❌ Ошибка обработки сообщения: {e}")
-            await asyncio.sleep(1)
             await asyncio.sleep(1)
 
 
