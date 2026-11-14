@@ -250,6 +250,8 @@ class MessengerService:
         return self.message_view(room_id, key, record)
 
     def image_message(self, uid, room_id, client_id, raw, text="", origin="site", telegram_id=None):
+        if self.media is None:
+            raise MessengerError("Image sharing is disabled", 403)
         room = self.room(uid, room_id)
         if room.get("telegram", {}).get("state") != "ready":
             raise MessengerError("Создание беседы", 409)

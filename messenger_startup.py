@@ -19,8 +19,8 @@ def start_messenger(application, protected_chat_ids=()):
     if keys:
         service = MessengerService(
             FirebaseStore(db), Cipher(keys),
-            FirebaseMedia(storage.bucket(os.getenv("MESSENGER_STORAGE_BUCKET",
-                                                   "dpgames-66d73.firebasestorage.app"))),
+            FirebaseMedia(storage.bucket(os.environ["MESSENGER_STORAGE_BUCKET"]))
+            if os.getenv("MESSENGER_STORAGE_BUCKET") else None,
             os.getenv("MESSENGER_OPERATOR_TG_ID"))
         if not service.operator_id:
             service.operator_id = service.operator_from_site_name(os.getenv("MESSENGER_OPERATOR_SITE_NAME", "Salyose"))

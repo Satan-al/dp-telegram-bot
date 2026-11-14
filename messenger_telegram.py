@@ -115,6 +115,9 @@ class MessengerTelegram:
             raise ApplicationHandlerStop
         client_id = f"tg:{chat_id}:{message.message_id}"
         try:
+            if (message.photo or message.document) and self.service.media is None:
+                await message.reply_text("Сейчас в чат сайта передаётся только текст.")
+                return
             if message.photo:
                 photo = await message.photo[-1].get_file()
                 raw = bytes(await photo.download_as_bytearray())

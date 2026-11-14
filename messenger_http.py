@@ -90,7 +90,7 @@ def create_app(service, verify_token, origins):
     @app.get(prefix + "/me")
     @authorized
     def me(uid):
-        return jsonify(user=service.profile(uid), telegramEnabled=bool(service.operator_id))
+        return jsonify(user=service.profile(uid), telegramEnabled=bool(service.operator_id), imagesEnabled=service.media is not None)
 
     @app.get(prefix + "/members")
     @authorized
