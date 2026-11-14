@@ -435,7 +435,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"⚠️ Игнорируем: чат {chat_id} — чужак!")
         return
     
-    if chat_id == RAT_CHAT_ID and not is_rat_mode_active():
+    rat_active = is_rat_mode_active()
+    if chat_id == RAT_CHAT_ID and not rat_active:
         print(f"⚠️ Игнорируем RAT группу когда режим off — свобода спит!")
         return
     
@@ -467,20 +468,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'fromTelegram': True
         }
         
-        # Push в Firebase ТОЛЬКО если из main или RAT on и из RAT (но для RAT не push, чтоб нет loop)
-        if chat_id == CHAT_ID or (chat_id == RAT_CHAT_ID and False):  # Для RAT не push, оставляем в TG
-            chat_ref = db.reference(CHAT_REF)
-            new_msg_ref = chat_ref.push(message_data)
-            msg_key = new_msg_ref.key
-            print(f"📱→🌐 {message_data['name']}: {text[:50]} (ключ: {msg_key})")
-            
-            if is_rat_mode_active():
-                ref_path = f"{CHAT_REF}/{msg_key}"
-                asyncio.create_task(delayed_delete(ref_path, 300))
-                print(f"⏳ Удаление {ref_path} через 5 мин")
-        
-        # Дубли в RAT TG если RAT on и из main
-        if is_rat_mode_active() and chat_id == CHAT_ID:
+        # firebase_callback ignores fromTelegram, so inbound messages are not echoed.
+        new_msg_ref = db.reference(CHAT_REF).push(message_data)
+        if rat_active:
+            asyncio.create_task(delayed_delete(f"{CHAT_REF}/{new_msg_ref.key}", 300))
+
+        if rat_active and chat_id == CHAT_ID:
             telegram_text = f"🎨 **{message_data['name']}**: {text}" if link else f"**{message_data['name']}**: {text}"
             await context.bot.send_message(
                 chat_id=RAT_CHAT_ID,
@@ -494,6 +487,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============= СЛУШАТЕЛЬ FIREBASE =============
+
+async def delayed_delete(path, seconds):
+    await asyncio.sleep(seconds)
+    try:
+        await asyncio.to_thread(db.reference(path).delete)
+    except Exception as error:
+        print(f"RAT message cleanup failed: {type(error).__name__}")
+
 
 def firebase_callback(event):
     """Синхронный callback для Firebase - добавляет в очередь с key"""
