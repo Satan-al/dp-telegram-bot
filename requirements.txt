@@ -1,3 +1,8 @@
 python-telegram-bot==21.10
 firebase-admin==6.3.0
 python-dotenv==1.0.0
+Flask>=3.1,<4
+waitress>=3.0.2,<4
+cryptography>=44,<49
+Pillow>=11,<13
+
