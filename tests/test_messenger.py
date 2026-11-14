@@ -83,6 +83,30 @@ class ServiceTests(unittest.TestCase):
         self.rid = self.service.create_room("alice", ["bob"])["id"]
         self.store.set(f"messenger/rooms/{self.rid}/telegram", {"state": "ready"})
 
+    def test_room_image_limit_shared_between_transports(self):
+        from messenger_core import DatabaseMedia
+        self.service.media = DatabaseMedia(self.store)
+        second = self.pending_room()
+        self.store.set(f"messenger/rooms/{second}/telegram", {"state": "ready"})
+        buf = io.BytesIO()
+        Image.new("RGB", (3, 3)).save(buf, "PNG")
+        def post(room, i):
+            origin = "telegram" if i % 2 == 0 else "site"
+            return self.service.image_message("alice", room, str(i), buf.getvalue(), f"caption {i}", origin)
+        other = post(second, 0)
+        first = post(self.rid, 0)
+        for i in range(1, 22):
+            post(self.rid, i)
+        expired = post(self.rid, 0)
+        self.assertEqual(first["id"], expired["id"])
+        self.assertTrue(expired["imageExpired"])
+        self.assertEqual("caption 0", expired["text"])
+        self.assertIsNone(expired["image"])
+        self.assertEqual(20, len(self.store.get("messenger/image_data/" + self.rid)))
+        with self.assertRaises(MessengerError):
+            self.service.image("bob", self.rid, first["image"]["id"])
+        self.assertTrue(self.service.image("bob", second, other["image"]["id"]))
+
     def pending_room(self):
         return self.service.create_room("alice", ["bob"], "group")["id"]
 

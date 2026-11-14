@@ -51,7 +51,7 @@ class MessengerTelegram:
             chat_id=int(self.service.operator_id),
             text=(f"Новая заявка №{short}.\n"
                   f"Создай пустую группу с названием «DP {short}», добавь меня администратором "
-                  "с правами приглашать, менять оформление и назначать администраторов "
+                  "с правами приглашать, удалять участников и сообщения, менять оформление и назначать администраторов "
                   "и напиши в этой группе «готово».\n"
                   "После моего подтверждения выйди из группы. Только тогда я открою приглашения.\n"
                   "Пригласительную ссылку можно прислать ответом сюда, но я могу создать её сам.\n"
@@ -64,6 +64,9 @@ class MessengerTelegram:
         if not message or str(update.effective_user.id) != self.service.operator_id:
             return
         setup = await self.call(self.service.queued_setup)
+        if setup and (message.text or "").strip().casefold() in {"готово", "готво", "/ready"}:
+            await message.reply_text("Напиши «готово» в самой новой группе, от своего имени, не здесь. Дождись моего ответа перед выходом.")
+            raise ApplicationHandlerStop
         if not setup or not message.reply_to_message:
             return
         active, room = setup
@@ -87,7 +90,7 @@ class MessengerTelegram:
         chat_id = message.chat_id
         room_id = await self.linked_room(chat_id)
         text = (message.text or "").strip()
-        if str(update.effective_user.id) == self.service.operator_id and text.casefold() == "готово":
+        if str(update.effective_user.id) == self.service.operator_id and text.casefold() in {"готово", "готво", "/ready"}:
             if str(chat_id) in self.protected:
                 return
             try:
@@ -100,6 +103,10 @@ class MessengerTelegram:
                 if await self.bot.get_chat_member_count(chat_id) != 2:
                     raise MessengerError("Нужна новая пустая группа: пока только ты и бот.")
                 room_id, _ = await self.call(self.service.bind_group, update.effective_user.id, chat_id)
+                try:
+                    await message.delete()
+                except TelegramError:
+                    await message.reply_text("Группа привязана. Не удалось удалить «готово»: удали его вручную перед выходом.")
                 await message.reply_text("Группа привязана. Теперь выйди из неё. Приглашения пока закрыты.")
             except MessengerError as error:
                 await message.reply_text(str(error))

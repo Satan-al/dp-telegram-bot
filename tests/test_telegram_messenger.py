@@ -44,7 +44,7 @@ class TelegramTests(unittest.TestCase):
         self.transport.call = direct_call
 
     def update(self, text="", user=111, left=None, joined=()):
-        message = NS(text=text, chat_id=-1001, reply_text=AsyncMock(),
+        message = NS(text=text, chat_id=-1001, reply_text=AsyncMock(), delete=AsyncMock(),
                      left_chat_member=NS(id=left) if left else None,
                      new_chat_members=list(joined), photo=[], document=None)
         return NS(effective_message=message, effective_user=NS(id=user, is_bot=False))
@@ -57,6 +57,16 @@ class TelegramTests(unittest.TestCase):
         self.bot.get_chat_member_count.return_value = 1
         with self.assertRaises(ApplicationHandlerStop):
             await self.transport.service_message(self.update(left=111), None)
+
+    @immediate
+    async def test_ready_deleted_in_group_only_after_binding(self):
+        update = self.update("готово")
+        with self.assertRaises(ApplicationHandlerStop):
+            await self.transport.private_message(update, None)
+        update.effective_message.delete.assert_not_awaited()
+        with self.assertRaises(ApplicationHandlerStop):
+            await self.transport.group_message(update, None)
+        update.effective_message.delete.assert_awaited_once()
 
     @immediate
     async def test_ready_does_not_publish_or_decorate(self):

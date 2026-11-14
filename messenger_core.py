@@ -38,10 +38,16 @@ def normalize_image(raw):
             if source.width * source.height > 24_000_000:
                 raise MessengerError("Image dimensions are too large", 413)
             image = ImageOps.exif_transpose(source)
-            image.thumbnail((2560, 2560))
-            image = image.convert("RGBA" if "A" in image.getbands() else "RGB")
+            image.thumbnail((1280, 1280))
+            image = image.convert("RGBA" if "A" in image.getbands() or "transparency" in source.info else "RGB")
             output = io.BytesIO()
-            image.save(output, format="WEBP", quality=90, method=4)
+            while True:
+                output.seek(0)
+                output.truncate()
+                image.save(output, format="WEBP", quality=80, method=4)
+                if output.tell() <= 192 * 1024:
+                    break
+                image.thumbnail((max(1, image.width * 3 // 4), max(1, image.height * 3 // 4)))
             return output.getvalue(), image.width, image.height
     except MessengerError:
         raise
@@ -80,7 +86,10 @@ class FirebaseStore:
         return self.db.reference(path).get()
 
     def set(self, path, value):
-        self.db.reference(path).set(value)
+        if value is None:
+            self.db.reference(path).delete()
+        else:
+            self.db.reference(path).set(value)
 
     def update(self, path, value):
         self.db.reference(path).update(value)
@@ -89,7 +98,7 @@ class FirebaseStore:
         return self.db.reference(path).transaction(fn)
 
     def new_key(self, path):
-        return self.db.reference(path).push().key
+        return f'm{time.time_ns():020d}_{secrets.token_hex(6)}'
 
     def page(self, path, before=None, after=None, limit=50):
         query = self.db.reference(path).order_by_key()
@@ -105,6 +114,17 @@ class FirebaseStore:
     def pending(self, path, limit=20):
         rows = self.db.reference(path).order_by_child("telegramState").equal_to("queued").limit_to_first(limit).get()
         return sorted((rows or {}).items())
+
+
+class DatabaseMedia:
+    def __init__(self, store):
+        self.store = store
+
+    def get(self, key):
+        data = self.store.get("messenger/image_data/" + key)
+        if not data:
+            raise MessengerError("Image expired", 404)
+        return data.encode("ascii")
 
 
 class FirebaseMedia:
@@ -255,13 +275,38 @@ class MessengerService:
         room = self.room(uid, room_id)
         if room.get("telegram", {}).get("state") != "ready":
             raise MessengerError("Создание беседы", 409)
-        with self.locks["image:" + room_id + ":" + uid + ":" + str(client_id)]:
+        with self.locks["image:" + room_id]:
             existing = self.existing_message(uid, room_id, str(client_id))
             if existing:
                 return existing
             with self.media_slots:
                 clean, width, height = normalize_image(raw)
             image_id = secrets.token_hex(16)
+            if isinstance(self.media, DatabaseMedia):
+                if not isinstance(client_id, str) or not re.fullmatch(r"[A-Za-z0-9:_-]{1,160}", client_id):
+                    raise MessengerError("Invalid message ID")
+                if not isinstance(text, str) or len(text) > 4000:
+                    raise MessengerError("Message is too long")
+                key = self.store.new_key(self.ROOT + "/messages/" + room_id)
+                digest = hashlib.sha256((room_id + ":" + uid + ":" + client_id).encode()).hexdigest()
+                stamp = now_ms()
+                payload = {"roomId": room_id, "senderUid": uid, "text": text.strip(),
+                           "image": {"id": image_id, "width": width, "height": height}}
+                record = {"senderUid": uid, "createdAt": stamp, "ciphertext": self.cipher.seal(payload),
+                          "origin": origin, "telegramState": "native" if origin == "telegram" else "queued",
+                          "telegramMessageId": telegram_id}
+                index = "media/" + room_id
+                blobs = "image_data/" + room_id
+                msgs = "messages/" + room_id
+                batch = {index + "/" + image_id: {"message": key}, msgs + "/" + key: record,
+                         blobs + "/" + image_id: self.cipher.encrypt(clean).decode("ascii"),
+                         "idempotency/" + digest: key, "rooms/" + room_id + "/updatedAt": stamp}
+                old = self.store.get(self.ROOT + "/" + index) or {}
+                for expired, meta in sorted(old.items(), key=lambda item: item[1]["message"])[:max(0, len(old)-19)]:
+                    batch[index + "/" + expired] = batch[blobs + "/" + expired] = None
+                    batch[msgs + "/" + meta["message"] + "/imageExpired"] = True
+                self.store.update(self.ROOT, batch)
+                return self.message_view(room_id, key, record)
             self.media.put(room_id + "/" + image_id, self.cipher.encrypt(clean))
             self.store.set(self.ROOT + "/media/" + room_id + "/" + image_id, {"uid": uid, "createdAt": now_ms()})
             try:
@@ -283,7 +328,8 @@ class MessengerService:
         if payload["roomId"] != room_id or payload["senderUid"] != record["senderUid"]:
             raise MessengerError("Encrypted content does not match conversation", 503)
         return {"id": key, "senderUid": record["senderUid"], "createdAt": record["createdAt"],
-                "text": payload["text"], "image": payload.get("image"),
+                "text": payload["text"], "image": None if record.get("imageExpired") else payload.get("image"),
+                "imageExpired": bool(record.get("imageExpired")),
                 "kind": payload.get("kind", "message"), "invite": payload.get("invite"),
                 "origin": record["origin"], "telegramState": record["telegramState"]}
 

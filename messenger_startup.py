@@ -4,7 +4,7 @@ import os
 import threading
 
 from firebase_admin import auth, db, storage
-from messenger_core import Cipher, FirebaseMedia, FirebaseStore, MessengerService
+from messenger_core import Cipher, DatabaseMedia, FirebaseMedia, FirebaseStore, MessengerService
 from messenger_http import create_app
 from messenger_telegram import MessengerTelegram
 
@@ -20,7 +20,7 @@ def start_messenger(application, protected_chat_ids=()):
         service = MessengerService(
             FirebaseStore(db), Cipher(keys),
             FirebaseMedia(storage.bucket(os.environ["MESSENGER_STORAGE_BUCKET"]))
-            if os.getenv("MESSENGER_STORAGE_BUCKET") else None,
+            if os.getenv("MESSENGER_STORAGE_BUCKET") else DatabaseMedia(FirebaseStore(db)),
             os.getenv("MESSENGER_OPERATOR_TG_ID"))
         if not service.operator_id:
             service.operator_id = service.operator_from_site_name(os.getenv("MESSENGER_OPERATOR_SITE_NAME", "Salyose"))
