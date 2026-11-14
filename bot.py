@@ -21,6 +21,7 @@ from telegram.ext import (
     ContextTypes
 )
 
+from messenger_links import matches as telegram_link_matches, unlink as unlink_telegram
 import firebase_admin
 from firebase_admin import credentials, db
 
@@ -103,7 +104,7 @@ def get_link_by_tg_id(tg_user_id):
         ref = db.reference(LINKS_REF)
         links = ref.get() or {}
         for link_id, link_data in links.items():
-            if link_data.get('tgUserId') == tg_user_id:
+            if telegram_link_matches(link_id, link_data, tg_user_id):
                 return link_data
     except Exception as e:
         print(f"❌ Ошибка get_link_by_tg_id: {e}")
@@ -259,25 +260,21 @@ async def unlink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user_id = update.effective_user.id
     
     try:
-        link = get_link_by_tg_id(tg_user_id)
-        
-        if not link:
+        removed = unlink_telegram(db.reference(LINKS_REF), tg_user_id)
+        if not removed:
             await update.message.reply_text(
                 "ℹ️ Твой Telegram не привязан ни к какому аккаунту."
             )
             return
         
-        # Удаляем привязку
-        links_ref = db.reference(LINKS_REF)
-        links_ref.child(link['siteUserId']).delete()
+        link = removed[0]
         
         await update.message.reply_text(
-            f"✅ Отвязано от аккаунта **{link['siteName']}**\n\n"
-            f"Теперь твои сообщения будут идти как [TG] сообщения.",
-            parse_mode='Markdown'
+            f"✅ Отвязано от аккаунта {link.get('siteName') or 'сайта'}.\n\n"
+            "Теперь твои сообщения будут идти как [TG] сообщения."
         )
         
-        print(f"✅ Отвязка: {update.effective_user.first_name} от {link['siteName']}")
+        print("Telegram unlink completed")
         
     except Exception as e:
         print(f"❌ Ошибка в unlink_command: {e}")
